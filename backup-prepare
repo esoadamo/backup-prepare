@@ -5,9 +5,9 @@ function help() {
   exitStatus="0"
   [ -n "$1" ] && exitStatus="$1"
 
-  echo "Usage: $0 [-h] [-m NUM] dir"
+  echo "Usage: $0 [-h] [-f] [-m NUM] dir"
   echo "-h      ... prints this message"
-  echo "-f      ... forces actions, does not ack for deletion confirmation"
+  echo "-f      ... forces actions, does not ask for deletion confirmation"
   echo "-m NUM  ... keep max last NUM of backups, delete older"
   echo "dir     ... directory in which the backup will be created"
 
