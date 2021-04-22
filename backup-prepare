@@ -1,21 +1,62 @@
 #!/bin/bash
+
+function help() {
+  # Prints help to console
+  exitStatus="0"
+  [ -n "$1" ] && exitStatus="$1"
+
+  echo "Usage: $0 [-h] [-m NUM] dir"
+  echo "-h      ... prints this message"
+  echo "-m NUM  ... keep max last NUM of backups, delete older"
+  echo "dir     ... directory in which the backup will be created"
+
+  exit "$exitStatus"
+}
+
+
+# Parse command line arguments
+maxBackups="INF"
+
+while getopts ":hm:" o; do
+    case "${o}" in
+        m)
+            maxBackups="$OPTARG"
+            { [ -n "$maxBackups" ] && [ "$maxBackups" -eq "$maxBackups" ]; } || help 1
+            ;;
+        h)
+            help
+            ;;
+        *)
+            help 1
+            ;;
+    esac
+done
+shift $((OPTIND-1))
+
 backupRootDir="$1"
 
+[ -z "$backupRootDir" ] && help 1
+
 function fail() {
-    echo "ERR: $1" >&2
-    exit 1
+  # Prints error to stderr and exits with status 1
+  echo "ERR: $1" >&2
+  exit 1
 }
 
 function backup-prepare() {
   cd "$backupRootDir" || fail "Cannot cd to $backupRootDir"
+  echo "Working in $backupRootDir"
   backupDir="$(date +'%Y%m%d-%H%M%S')"
   # shellcheck disable=SC2166
   if [ -e "latest" -o -L "latest" ]; then
+    echo "Copying from latest to $backupDir"
     cp -lr "latest" "$backupDir" || fail "Copying last latest failed"
     rm "latest" || fail "Cannot remove latest"
   else
+    echo "First init, creating $backupDir"
     mkdir "$backupDir" || fail "Cannot create backup dir $backupDir"
   fi
+  echo "Linking $backupDir to latest"
   ln -s "$backupDir" "latest" || fail "Linking new latest failed"
 }
 
