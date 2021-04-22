@@ -1,0 +1,22 @@
+#!/bin/bash
+backupRootDir="$1"
+
+function fail() {
+    echo "ERR: $1" >&2
+    exit 1
+}
+
+function backup-prepare() {
+  cd "$backupRootDir" || fail "Cannot cd to $backupRootDir"
+  backupDir="$(date +'%Y%m%d-%H%M%S')"
+  # shellcheck disable=SC2166
+  if [ -e "latest" -o -L "latest" ]; then
+    cp -lr "latest" "$backupDir" || fail "Copying last latest failed"
+    rm "latest" || fail "Cannot remove latest"
+  else
+    mkdir "$backupDir" || fail "Cannot create backup dir $backupDir"
+  fi
+  ln -s "$backupDir" "latest" || fail "Linking new latest failed"
+}
+
+( backup-prepare; )
