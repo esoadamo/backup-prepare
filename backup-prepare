@@ -7,6 +7,7 @@ function help() {
 
   echo "Usage: $0 [-h] [-m NUM] dir"
   echo "-h      ... prints this message"
+  echo "-f      ... forces actions, does not ack for deletion confirmation"
   echo "-m NUM  ... keep max last NUM of backups, delete older"
   echo "dir     ... directory in which the backup will be created"
 
@@ -16,12 +17,16 @@ function help() {
 
 # Parse command line arguments
 maxBackups="INF"
+actionForce="0"
 
-while getopts ":hm:" o; do
+while getopts ":hfm:" o; do
     case "${o}" in
         m)
             maxBackups="$OPTARG"
             { [ -n "$maxBackups" ] && [ "$maxBackups" -eq "$maxBackups" ]; } || help 1
+            ;;
+        f)
+            actionForce="1"
             ;;
         h)
             help
@@ -43,6 +48,51 @@ function fail() {
   exit 1
 }
 
+function q-yes-no {
+  question="$1"
+  while true; do
+    read -rp "$question [y/n]: " r
+    case "$r" in
+        [Yy]*) return 0  ;;
+        [Nn]*) echo "Aborted" ; return  1 ;;
+    esac
+  done
+}
+
+function delete-old-backups() {
+  # Deletes old backup so to keep up to "$maxBackups" backups
+  if [[ "$maxBackups" == "INF" ]]; then
+    # keep infinity backups
+    return
+  fi
+  # shellcheck disable=SC2010
+  backupDates="$(ls -d -- */ | grep -E "[0-9]{8}-[0-9]{6}" | sed -Ee 's|^(.*)/$|\1|' | sort)" || fail "Cannot find backup dates"
+  backupsCount="$(echo "$backupDates" | wc -l)"
+  echo "Found $backupsCount backups, maximum is $maxBackups"
+
+  if [ "$backupsCount" -le "$maxBackups" ]; then
+    return
+  fi
+
+  backupsToDelete="$(echo "$backupDates" | head -n "-${maxBackups}")"
+  backupsToKeep="$(echo "$backupDates" | tail -n "${maxBackups}")"
+  echo "Will delete following backups:"
+  echo "$backupsToDelete" | sed -Ee "s/^(.*)$/- \1/"
+  echo "And keep:"
+  echo "$backupsToKeep" | sed -Ee "s/^(.*)$/- \1/"
+
+  [ "$actionForce" -eq "1" ] || q-yes-no "Do you want to delete old backups?" || {
+    exit 2
+  }
+
+  echo "Deleting old backups:"
+  while read -r folder; do
+    echo -n "- $folder ... "
+    rm -rf "$folder" || fail "Could not delete"
+    echo "done"
+  done <<< "$backupsToDelete"
+}
+
 function backup-prepare() {
   cd "$backupRootDir" || fail "Cannot cd to $backupRootDir"
   echo "Working in $backupRootDir"
@@ -58,6 +108,7 @@ function backup-prepare() {
   fi
   echo "Linking $backupDir to latest"
   ln -s "$backupDir" "latest" || fail "Linking new latest failed"
+  delete-old-backups
 }
 
 ( backup-prepare; )
