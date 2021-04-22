@@ -97,6 +97,7 @@ function backup-prepare() {
   cd "$backupRootDir" || fail "Cannot cd to $backupRootDir"
   echo "Working in $backupRootDir"
   backupDir="$(date +'%Y%m%d-%H%M%S')"
+  [ -e "$backupDir" ] && fail "$backupDir already exists!"
   # shellcheck disable=SC2166
   if [ -e "latest" -o -L "latest" ]; then
     echo "Copying from latest to $backupDir"
