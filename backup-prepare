@@ -5,38 +5,42 @@ function help() {
   exitStatus="0"
   [ -n "$1" ] && exitStatus="$1"
 
-  echo "Usage: $0 [-h] [-f] [-m NUM] dir"
+  echo "Usage: $0 [-h] [-f] [-d] [-m NUM] dir"
   echo "-h      ... prints this message"
   echo "-f      ... forces actions, does not ask for deletion confirmation"
   echo "-m NUM  ... keep max last NUM of backups, delete older"
+  echo "-d      ... only delete old backups, do not create new one"
   echo "dir     ... directory in which the backup will be created"
 
   exit "$exitStatus"
 }
 
-
 # Parse command line arguments
 maxBackups="INF"
 actionForce="0"
+actionBackup="1"
 
-while getopts ":hfm:" o; do
-    case "${o}" in
-        m)
-            maxBackups="$OPTARG"
-            { [ -n "$maxBackups" ] && [ "$maxBackups" -eq "$maxBackups" ]; } || help 1
-            ;;
-        f)
-            actionForce="1"
-            ;;
-        h)
-            help
-            ;;
-        *)
-            help 1
-            ;;
-    esac
+while getopts ":hfdm:" o; do
+  case "${o}" in
+  m)
+    maxBackups="$OPTARG"
+    { [ -n "$maxBackups" ] && [ "$maxBackups" -eq "$maxBackups" ]; } || help 1
+    ;;
+  f)
+    actionForce="1"
+    ;;
+  d)
+    actionBackup="0"
+    ;;
+  h)
+    help
+    ;;
+  *)
+    help 1
+    ;;
+  esac
 done
-shift $((OPTIND-1))
+shift $((OPTIND - 1))
 
 backupRootDir="$1"
 
@@ -48,13 +52,16 @@ function fail() {
   exit 1
 }
 
-function q-yes-no {
+function q-yes-no() {
   question="$1"
   while true; do
     read -rp "$question [y/n]: " r
     case "$r" in
-        [Yy]*) return 0  ;;
-        [Nn]*) echo "Aborted" ; return  1 ;;
+    [Yy]*) return 0 ;;
+    [Nn]*)
+      echo "Aborted"
+      return 1
+      ;;
     esac
   done
 }
@@ -90,26 +97,32 @@ function delete-old-backups() {
     echo -n "- $folder ... "
     rm -rf "$folder" || fail "Could not delete"
     echo "done"
-  done <<< "$backupsToDelete"
+  done <<<"$backupsToDelete"
 }
 
 function backup-prepare() {
   cd "$backupRootDir" || fail "Cannot cd to $backupRootDir"
   echo "Working in $backupRootDir"
-  backupDir="$(date +'%Y%m%d-%H%M%S')"
-  [ -e "$backupDir" ] && fail "$backupDir already exists!"
-  # shellcheck disable=SC2166
-  if [ -e "latest" -o -L "latest" ]; then
-    echo "Copying from latest to $backupDir"
-    cp -lr "latest" "$backupDir" || fail "Copying last latest failed"
-    rm "latest" || fail "Cannot remove latest"
-  else
-    echo "First init, creating $backupDir"
-    mkdir "$backupDir" || fail "Cannot create backup dir $backupDir"
+
+  # prepare backup if enabled
+  if [ "$actionBackup" -ne "0" ]; then
+    backupDir="$(date +'%Y%m%d-%H%M%S')"
+    [ -e "$backupDir" ] && fail "$backupDir already exists!"
+    # shellcheck disable=SC2166
+    if [ -e "latest" -o -L "latest" ]; then
+      echo "Copying from latest to $backupDir"
+      cp -lr "latest" "$backupDir" || fail "Copying last latest failed"
+      rm "latest" || fail "Cannot remove latest"
+    else
+      echo "First init, creating $backupDir"
+      mkdir "$backupDir" || fail "Cannot create backup dir $backupDir"
+    fi
+    echo "Linking $backupDir to latest"
+    ln -s "$backupDir" "latest" || fail "Linking new latest failed"
   fi
-  echo "Linking $backupDir to latest"
-  ln -s "$backupDir" "latest" || fail "Linking new latest failed"
+
+  # delete old backups
   delete-old-backups
 }
 
-( backup-prepare; )
+(backup-prepare)

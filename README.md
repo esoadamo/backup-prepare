@@ -9,12 +9,10 @@ After this is done, you can run `rsync`, that will incrementally change only mod
 ## How to use?
 
 ```
-Usage: ./backup-prepare [-h] [-f] [-m NUM] dir
+Usage: ./backup-prepare [-h] [-f] [-d] [-m NUM] dir
 -h      ... prints this message
 -f      ... forces actions, does not ask for deletion confirmation
 -m NUM  ... keep max last NUM of backups, delete older
+-d      ... only delete old backups, do not create new one
 dir     ... directory in which the backup will be created
 ```
-
-
-
