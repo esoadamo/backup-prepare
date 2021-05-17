@@ -6,6 +6,14 @@ You give it a directory and it will create a folder of name current date and tim
 
 After this is done, you can run `rsync`, that will incrementally change only modified files and the rest is kept unchanged. The effect is that in the end you have multiple full backups which take only a fraction of space that it would if you were to copy all content.
 
+## How to install (or update)
+
+```bash
+sudo wget 'https://raw.githubusercontent.com/esoadamo/backup-prepare/main/backup-prepare' -O /usr/bin/backup-prepare
+sudo chown root:root /usr/bin/backup-prepare
+sudo chmod 755 /usr/bin/backup-prepare
+```
+
 ## How to use?
 
 ```
