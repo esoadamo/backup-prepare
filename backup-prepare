@@ -111,7 +111,7 @@ function backup-prepare() {
     # shellcheck disable=SC2166
     if [ -e "latest" -o -L "latest" ]; then
       echo "Copying from latest to $backupDir"
-      cp -lr "latest" "$backupDir" || fail "Copying last latest failed"
+      cp -lPr "latest" "$backupDir" || fail "Copying last latest failed"
       rm "latest" || fail "Cannot remove latest"
     else
       echo "First init, creating $backupDir"
