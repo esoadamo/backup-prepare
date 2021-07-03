@@ -17,10 +17,13 @@ sudo chmod 755 /usr/bin/backup-prepare
 ## How to use?
 
 ```
-Usage: ./backup-prepare [-h] [-f] [-d] [-m NUM] dir
+Usage: ./backup-prepare [-h] [-f] [-d] [-m NUM] action dir
 -h      ... prints this message
 -f      ... forces actions, does not ask for deletion confirmation
 -m NUM  ... keep max last NUM of backups, delete older
--d      ... only delete old backups, do not create new one
+action  ... prepare | finish | delete
+            - prepare  ... creates new directory and in-progress link
+            - finish   ... changes latest to in-progress and deletes old backups (in max backups is specified)
+            - delete   ... deletes old backups (in max backups is specified)
 dir     ... directory in which the backup will be created
 ```

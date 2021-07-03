@@ -5,11 +5,14 @@ function help() {
   exitStatus="0"
   [ -n "$1" ] && exitStatus="$1"
 
-  echo "Usage: $0 [-h] [-f] [-d] [-m NUM] dir"
+  echo "Usage: $0 [-h] [-f] [-d] [-m NUM] action dir"
   echo "-h      ... prints this message"
   echo "-f      ... forces actions, does not ask for deletion confirmation"
   echo "-m NUM  ... keep max last NUM of backups, delete older"
-  echo "-d      ... only delete old backups, do not create new one"
+  echo "action  ... prepare | finish | delete"
+  echo "            - prepare  ... creates new directory and in-progress link"
+  echo "            - finish   ... changes latest to in-progress and deletes old backups (in max backups is specified)"
+  echo "            - delete   ... deletes old backups (in max backups is specified)"
   echo "dir     ... directory in which the backup will be created"
 
   exit "$exitStatus"
@@ -18,9 +21,8 @@ function help() {
 # Parse command line arguments
 maxBackups="INF"
 actionForce="0"
-actionBackup="1"
 
-while getopts ":hfdm:" o; do
+while getopts ":hfm:" o; do
   case "${o}" in
   m)
     maxBackups="$OPTARG"
@@ -28,9 +30,6 @@ while getopts ":hfdm:" o; do
     ;;
   f)
     actionForce="1"
-    ;;
-  d)
-    actionBackup="0"
     ;;
   h)
     help
@@ -42,8 +41,10 @@ while getopts ":hfdm:" o; do
 done
 shift $((OPTIND - 1))
 
-backupRootDir="$1"
+action="$1"
+backupRootDir="$2"
 
+[[ "$action" != "prepare" ]] && [[ "$action" != "finish" ]] && [[ "$action" != "delete" ]] && help 1
 [ -z "$backupRootDir" ] && help 1
 
 function fail() {
@@ -53,6 +54,7 @@ function fail() {
 }
 
 function q-yes-no() {
+  # Yes/no question
   question="$1"
   while true; do
     read -rp "$question [y/n]: " r
@@ -66,7 +68,54 @@ function q-yes-no() {
   done
 }
 
-function delete-old-backups() {
+function backup-prepare() {
+  cd "$backupRootDir" || fail "Cannot cd to $backupRootDir"
+  echo "Working in $backupRootDir"
+
+  backupDir="$(date +'%Y%m%d-%H%M%S')"
+  [ -e "$backupDir" ] && fail "$backupDir already exists!"
+
+  # Test if already in-progress
+  if [ -e "in-progress" ]; then
+    if [ "$actionForce" -eq "1" ]; then
+      echo "Force deleting in-progress"
+      target="$(readlink 'in-progress')" || fail "Could not read in-progress target"
+      rm -rf "$target" || fail "Failed to remove in-progress files (folder $target)"
+      rm -f "in-progress" || fail "Failed to remove in-progress link"
+    else
+      fail "Link in-progress found, please investigate"
+    fi
+  fi
+
+  # Create new backup directory
+  echo "Creating new backup dir $backupDir"
+  mkdir "$backupDir" || fail "Could not create backup link"
+  echo "Creating working link 'in-progress' to $backupDir"
+  ln -s "$backupDir" "in-progress"
+  # shellcheck disable=SC2166
+  if [ -e "latest" -o -L "latest" ]; then
+    echo "Copying from latest to in-progress"
+    latest="$(readlink 'latest')" || fail "Could not read latest target"
+    cp -lPr "$latest/." "in-progress/" || fail "Copying last latest failed"
+  else
+    echo "First init, nothing to copy"
+  fi
+  echo "Backup preparation done"
+}
+
+function backup-finish() {
+  # Replace latest with in-progress
+  cd "$backupRootDir" || fail "Cannot cd to $backupRootDir"
+  echo "Working in $backupRootDir"
+  [ ! -e "in-progress" ] && fail "No in-progress folder found, nothing to finish"
+  rm "latest" || fail "Could not remove latest link"
+  mv "in-progress" "latest" || fail "Could move move in-progress to latest"
+  echo "Backup finished"
+}
+
+function backup-delete-old() {
+  cd "$backupRootDir" || fail "Cannot cd to $backupRootDir"
+
   # Deletes old backup so to keep up to "$maxBackups" backups
   if [[ "$maxBackups" == "INF" ]]; then
     # keep infinity backups
@@ -100,29 +149,15 @@ function delete-old-backups() {
   done <<<"$backupsToDelete"
 }
 
-function backup-prepare() {
-  cd "$backupRootDir" || fail "Cannot cd to $backupRootDir"
-  echo "Working in $backupRootDir"
-
-  # prepare backup if enabled
-  if [ "$actionBackup" -ne "0" ]; then
-    backupDir="$(date +'%Y%m%d-%H%M%S')"
-    [ -e "$backupDir" ] && fail "$backupDir already exists!"
-    # shellcheck disable=SC2166
-    if [ -e "latest" -o -L "latest" ]; then
-      echo "Copying from latest to $backupDir"
-      cp -lPr "latest" "$backupDir" || fail "Copying last latest failed"
-      rm "latest" || fail "Cannot remove latest"
-    else
-      echo "First init, creating $backupDir"
-      mkdir "$backupDir" || fail "Cannot create backup dir $backupDir"
-    fi
-    echo "Linking $backupDir to latest"
-    ln -s "$backupDir" "latest" || fail "Linking new latest failed"
-  fi
-
-  # delete old backups
-  delete-old-backups
-}
-
-(backup-prepare)
+case "$action" in
+  prepare)
+    (backup-prepare)
+    ;;
+  finish)
+    (backup-finish) &&
+    (backup-delete-old)
+    ;;
+  delete)
+    (backup-delete-old)
+    ;;
+esac
