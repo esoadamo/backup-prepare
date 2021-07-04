@@ -108,7 +108,7 @@ function backup-finish() {
   cd "$backupRootDir" || fail "Cannot cd to $backupRootDir"
   echo "Working in $backupRootDir"
   [ ! -e "in-progress" ] && fail "No in-progress folder found, nothing to finish"
-  rm "latest" || fail "Could not remove latest link"
+  [ -e "latest" ] && { rm "latest" || fail "Could not remove latest link"; }
   mv "in-progress" "latest" || fail "Could move move in-progress to latest"
   echo "Backup finished"
 }
