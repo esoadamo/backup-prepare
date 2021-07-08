@@ -78,27 +78,24 @@ function backup-prepare() {
   # Test if already in-progress
   if [ -e "in-progress" ]; then
     if [ "$actionForce" -eq "1" ]; then
-      echo "Force deleting in-progress"
-      target="$(readlink 'in-progress')" || fail "Could not read in-progress target"
-      rm -rf "$target" || fail "Failed to remove in-progress files (folder $target)"
-      rm -f "in-progress" || fail "Failed to remove in-progress link"
+      echo "Link in-progress already existing, ignoring and using it"
     else
       fail "Link in-progress found, please investigate"
     fi
-  fi
-
-  # Create new backup directory
-  echo "Creating new backup dir $backupDir"
-  mkdir "$backupDir" || fail "Could not create backup link"
-  echo "Creating working link 'in-progress' to $backupDir"
-  ln -s "$backupDir" "in-progress"
-  # shellcheck disable=SC2166
-  if [ -e "latest" -o -L "latest" ]; then
-    echo "Copying from latest to in-progress"
-    latest="$(readlink 'latest')" || fail "Could not read latest target"
-    cp -lPr "$latest/." "in-progress/" || fail "Copying last latest failed"
   else
-    echo "First init, nothing to copy"
+    # Create new backup directory
+    echo "Creating new backup dir $backupDir"
+    mkdir "$backupDir" || fail "Could not create backup link"
+    echo "Creating working link 'in-progress' to $backupDir"
+    ln -s "$backupDir" "in-progress"
+    # shellcheck disable=SC2166
+    if [ -e "latest" -o -L "latest" ]; then
+      echo "Copying from latest to in-progress"
+      latest="$(readlink 'latest')" || fail "Could not read latest target"
+      cp -lPr "$latest/." "in-progress/" || fail "Copying last latest failed"
+    else
+      echo "First init, nothing to copy"
+    fi
   fi
   echo "Backup preparation done"
 }
@@ -150,14 +147,14 @@ function backup-delete-old() {
 }
 
 case "$action" in
-  prepare)
-    (backup-prepare)
-    ;;
-  finish)
-    (backup-finish) &&
+prepare)
+  (backup-prepare)
+  ;;
+finish)
+  (backup-finish) &&
     (backup-delete-old)
-    ;;
-  delete)
-    (backup-delete-old)
-    ;;
+  ;;
+delete)
+  (backup-delete-old)
+  ;;
 esac
