@@ -5,7 +5,7 @@ function help() {
   exitStatus="0"
   [ -n "$1" ] && exitStatus="$1"
 
-  echo "Usage: $0 [-h] [-f] [-d] [-b snapshotsDir]  [-m NUM] action dir"
+  echo "Usage: $0 [-h] [-f] [-d] [-b snapshotsDir] [-m NUM] action dir"
   echo "-h      ... prints this message"
   echo "-f      ... forces actions, does not ask for deletion confirmation"
   echo "-b DIR  ... use btrfs mode and save snapshots into given directory"
