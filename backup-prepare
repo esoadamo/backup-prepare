@@ -5,9 +5,10 @@ function help() {
   exitStatus="0"
   [ -n "$1" ] && exitStatus="$1"
 
-  echo "Usage: $0 [-h] [-f] [-d] [-m NUM] action dir"
+  echo "Usage: $0 [-h] [-f] [-d] [-b snapshotsDir]  [-m NUM] action dir"
   echo "-h      ... prints this message"
   echo "-f      ... forces actions, does not ask for deletion confirmation"
+  echo "-b DIR  ... use btrfs mode and save snapshots into given directory"
   echo "-m NUM  ... keep max last NUM of backups, delete older"
   echo "action  ... prepare | finish | delete"
   echo "            - prepare  ... creates new directory and in-progress link"
@@ -21,8 +22,15 @@ function help() {
 # Parse command line arguments
 maxBackups="INF"
 actionForce="0"
+btrfsSnapshotsDir=""
 
-while getopts ":hfm:" o; do
+function fail() {
+  # Prints error to stderr and exits with status 1
+  echo "ERR: $1" >&2
+  exit 1
+}
+
+while getopts ":hfm:b:" o; do
   case "${o}" in
   m)
     maxBackups="$OPTARG"
@@ -30,6 +38,10 @@ while getopts ":hfm:" o; do
     ;;
   f)
     actionForce="1"
+    ;;
+  b)
+    btrfsSnapshotsDir="$(realpath "$OPTARG")"
+    { [ -z "$btrfsSnapshotsDir" ] || [ ! -d "$btrfsSnapshotsDir" ]; } && fail "Cannot find snapshotsDir '$btrfsSnapshotsDir'"
     ;;
   h)
     help
@@ -46,12 +58,6 @@ backupRootDir="$2"
 
 [[ "$action" != "prepare" ]] && [[ "$action" != "finish" ]] && [[ "$action" != "delete" ]] && help 1
 [ -z "$backupRootDir" ] && help 1
-
-function fail() {
-  # Prints error to stderr and exits with status 1
-  echo "ERR: $1" >&2
-  exit 1
-}
 
 function q-yes-no() {
   # Yes/no question
@@ -72,41 +78,76 @@ function backup-prepare() {
   cd "$backupRootDir" || fail "Cannot cd to $backupRootDir"
   echo "Working in $backupRootDir"
 
-  backupDir="$(date +'%Y%m%d-%H%M%S')"
-  [ -e "$backupDir" ] && fail "$backupDir already exists!"
+  backupName="$(date +'%Y%m%d-%H%M%S')"
 
-  # Test if already in-progress
-  if [ -e "in-progress" ]; then
-    if [ "$actionForce" -eq "1" ]; then
-      echo "Link in-progress already existing, ignoring and using it"
-    else
-      fail "Link in-progress found, please investigate"
+  if [ -n "$btrfsSnapshotsDir" ]; then
+    if [ ! -f "backup-prepare-id.txt" ]; then
+      id="$(cat /proc/sys/kernel/random/uuid)"
+      echo "$id" > "backup-prepare-id.txt" || fail "Cannot assign id"
+      echo "Assigned new ID $id"
     fi
+    # Create new btrfs -before subvolume
+    backupId="$(cat backup-prepare-id.txt)"
+    backupName="${backupId}-${backupName}"
+    if btrfs subvolume list . | grep -F "$backupId" | sort | tail -n 1 | grep -Fq '-before' && [ "$actionForce" -eq "0" ]; then
+      fail "Backup already in progress"
+    fi
+    btrfs subvolume snapshot -r . "$btrfsSnapshotsDir/$backupName-before" &>/dev/null || fail "Could not create before snapshot"
   else
-    # Create new backup directory
-    echo "Creating new backup dir $backupDir"
-    mkdir "$backupDir" || fail "Could not create backup link"
-    echo "Creating working link 'in-progress' to $backupDir"
-    ln -s "$backupDir" "in-progress"
-    # shellcheck disable=SC2166
-    if [ -e "latest" -o -L "latest" ]; then
-      echo "Copying from latest to in-progress"
-      latest="$(readlink 'latest')" || fail "Could not read latest target"
-      cp -lPr "$latest/." "in-progress/" || fail "Copying last latest failed"
-    else
-      echo "First init, nothing to copy"
-    fi
+      [ -e "$backupName" ] && fail "$backupName already exists!"
+
+      # Test if already in-progress
+      if [ -e "in-progress" ]; then
+        if [ "$actionForce" -eq "1" ]; then
+          echo "Link in-progress already existing, ignoring and using it"
+        else
+          fail "Link in-progress found, please investigate"
+        fi
+      else
+        # Create new backup directory
+        echo "Creating new backup dir $backupName"
+        mkdir "$backupName" || fail "Could not create backup link"
+        echo "Creating working link 'in-progress' to $backupName"
+        ln -s "$backupName" "in-progress"
+        # shellcheck disable=SC2166
+        if [ -e "latest" -o -L "latest" ]; then
+          echo "Copying from latest to in-progress"
+          latest="$(readlink 'latest')" || fail "Could not read latest target"
+          cp -lPr "$latest/." "in-progress/" || fail "Copying last latest failed"
+        else
+          echo "First init, nothing to copy"
+        fi
+      fi
   fi
+
   echo "Backup preparation done"
 }
 
 function backup-finish() {
-  # Replace latest with in-progress
   cd "$backupRootDir" || fail "Cannot cd to $backupRootDir"
-  echo "Working in $backupRootDir"
-  [ ! -e "in-progress" ] && fail "No in-progress folder found, nothing to finish"
-  [ -e "latest" ] && { rm "latest" || fail "Could not remove latest link"; }
-  mv "in-progress" "latest" || fail "Could move move in-progress to latest"
+
+  if [ -n "$btrfsSnapshotsDir" ]; then
+    # Create finish snapshot
+    backupId="$(cat backup-prepare-id.txt)" || fail "Cannot read backup group id"
+    backupName="${backupId}-$(date +'%Y%m%d-%H%M%S')"
+    snapshotsInProgress="$(btrfs subvolume list . | grep -F "$backupId" | grep -F '-before' | sort | rev | cut -d' ' -f 1 | rev)"
+    if [ -z "$snapshotsInProgress" ] && [ "$actionForce" -eq "0" ]; then
+      fail "Backup is not in progress"
+    fi
+    # Delete all unfinished backups
+    if [ -n "$snapshotsInProgress" ]; then
+      while read -r snapshotname; do
+         btrfs subvolume delete "$btrfsSnapshotsDir/../$snapshotname" &>/dev/null || fail "Cannot delete in progress snapshot ($snapshotname)" ;
+      done <<<"$snapshotsInProgress"
+    fi
+    btrfs subvolume snapshot -r . "$btrfsSnapshotsDir/$backupName-finish" &>/dev/null || fail "Could not create finish snapshot"
+  else
+    # Replace latest with in-progress
+    echo "Working in $backupRootDir"
+    [ ! -e "in-progress" ] && fail "No in-progress backupName found, nothing to finish"
+    [ -e "latest" ] && { rm "latest" || fail "Could not remove latest link"; }
+    mv "in-progress" "latest" || fail "Could move move in-progress to latest"
+  fi
   echo "Backup finished"
 }
 
@@ -118,10 +159,17 @@ function backup-delete-old() {
     # keep infinity backups
     return
   fi
-  # shellcheck disable=SC2010
-  backupDates="$(ls -d -- */ | grep -E "[0-9]{8}-[0-9]{6}" | sed -Ee 's|^(.*)/$|\1|' | sort)" || fail "Cannot find backup dates"
+
+  if [ -n "$btrfsSnapshotsDir" ]; then
+    backupId="$(cat backup-prepare-id.txt)" || fail "Cannot read backup group id"
+    # shellcheck disable=SC2010
+    backupDates="$(btrfs subvolume list . | grep -F "$backupId" | grep -Fv '-before' | grep -E "[0-9]{8}-[0-9]{6}" | sed -Ee 's|^.*-(.*-.*)-finish$|\1|' | sort)" || fail "Cannot find backup dates"
+  else
+    # shellcheck disable=SC2010
+    backupDates="$(ls -d -- */ | grep -E "[0-9]{8}-[0-9]{6}" | sed -Ee 's|^(.*)/$|\1|' | sort)" || fail "Cannot find backup dates"
+  fi
   backupsCount="$(echo "$backupDates" | wc -l)"
-  echo "Found $backupsCount backups, maximum is $maxBackups"
+  echo "Found $backupsCount finished backups, maximum is $maxBackups"
 
   if [ "$backupsCount" -le "$maxBackups" ]; then
     return
@@ -139,9 +187,14 @@ function backup-delete-old() {
   }
 
   echo "Deleting old backups:"
-  while read -r folder; do
-    echo -n "- $folder ... "
-    rm -rf "$folder" || fail "Could not delete"
+  while read -r backupName; do
+    echo -n "- $backupName ... "
+    if [ -n "$btrfsSnapshotsDir" ]; then
+      backupId="$(cat backup-prepare-id.txt)" || fail "Cannot read backup group id"
+      btrfs subvolume delete "$btrfsSnapshotsDir/${backupId}-${backupName}-finish" &>/dev/null || fail "Could not delete"
+    else
+      rm -rf "$backupName" || fail "Could not delete"
+    fi
     echo "done"
   done <<<"$backupsToDelete"
 }
